@@ -64,7 +64,7 @@ local function render()
                 danmaku.b,
                 danmaku.g,
                 danmaku.r,
-                danmaku.message)
+                danmaku.message:gsub("\n", "\\N"))
         danmaku.x = danmaku.x - w / duration * interval
         rows[danmaku.y] = math.max(rows[danmaku.y] or -math.huge, danmaku.x + #danmaku.message * size)
     end
