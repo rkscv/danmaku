@@ -2,7 +2,7 @@
 
 local utils = require('mp.utils')
 
-local duration = 5
+local duration = 9
 local interval = .001
 local danmaku = nil
 local ov = mp.create_osd_overlay('ass-events')
@@ -62,7 +62,7 @@ local function render()
             data = data .. '\n'
         end
         data = data ..
-            string.format('{\\pos(%d,%d)\\c&H%x%x%x&\\alpha&H30\\fscx50\\fscy50\\bord2\\b1\\q2}%s', danmaku.x,
+            string.format('{\\pos(%f,%f)\\c&H%x%x%x&\\alpha&H30\\fscx50\\fscy50\\bord1.5\\b1\\q2}%s', danmaku.x,
                 (danmaku.y - 1) * (size + spacing),
                 danmaku.b,
                 danmaku.g,
