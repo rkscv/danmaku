@@ -22,6 +22,11 @@ local function render()
         mp.msg.error(error)
         return
     end
+    local speed, error = mp.get_property_number('speed')
+    if error then
+        mp.msg.error(error)
+        return
+    end
     -- https://mpv.io/manual/stable/#options-sub-font-size
     size = size / 720 * h / 2
     local spacing = size / 10
@@ -68,7 +73,7 @@ local function render()
                 danmaku.g,
                 danmaku.r,
                 danmaku.message:gsub("\n", "\\N"))
-        danmaku.x = danmaku.x - w / duration * interval
+        danmaku.x = danmaku.x - w / duration * speed * interval
         rows[danmaku.y] = math.max(rows[danmaku.y] or -math.huge, danmaku.x + #danmaku.message * size)
         ::continue::
     end
