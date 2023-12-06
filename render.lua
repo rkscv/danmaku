@@ -32,12 +32,15 @@ local function render()
 
     local data = ''
     for _, danmaku in ipairs(danmaku) do
-        if danmaku.duration > pos then
+        if danmaku.duration > pos + duration then
             break
         end
 
         if not danmaku.x then
             danmaku.x = w - (pos - danmaku.duration) * (w / duration)
+        end
+        if danmaku.x + #danmaku.message * size < 0 then
+            goto continue
         end
         if not danmaku.y then
             for index, row in ipairs(rows) do
@@ -67,6 +70,7 @@ local function render()
                 danmaku.message:gsub("\n", "\\N"))
         danmaku.x = danmaku.x - w / duration * interval
         rows[danmaku.y] = math.max(rows[danmaku.y] or -math.huge, danmaku.x + #danmaku.message * size)
+        ::continue::
     end
     ov.data = data
     ov.res_x = w
