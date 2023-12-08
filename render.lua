@@ -163,7 +163,7 @@ mp.register_script_message('emit-danmaku', function(json)
     end
 end)
 mp.observe_property('pause', 'bool', function(_, value)
-    if enabled then
+    if enabled and danmaku then
         if value then
             timer:kill()
         else
