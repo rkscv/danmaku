@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/rivo/uniseg"
 )
 
 type dandanplayMatch struct {
@@ -98,13 +100,14 @@ func dandanplayComments(ctx context.Context, name string) ([]danmaku, error) {
 			panic(err)
 		}
 		comments[i] = danmaku{
-			Message: strings.ReplaceAll(comment.M, "\n", "\\N"),
-			Time:    t,
-			R:       uint8(c / (256 * 256)),
-			G:       uint8(c % (256 * 256) / 256),
-			B:       uint8(c % 256),
-			X:       INVALID_X,
-			Y:       INVALID_Y,
+			Message:              strings.ReplaceAll(comment.M, "\n", "\\N"),
+			GraphemeClusterCount: uniseg.GraphemeClusterCount(comment.M),
+			Time:                 t,
+			R:                    uint8(c / (256 * 256)),
+			G:                    uint8(c % (256 * 256) / 256),
+			B:                    uint8(c % 256),
+			X:                    INVALID_X,
+			Y:                    INVALID_Y,
 		}
 	}
 	slices.SortFunc(comments, func(a, b danmaku) int {

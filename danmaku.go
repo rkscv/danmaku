@@ -24,11 +24,12 @@ import (
 )
 
 type danmaku struct {
-	Message string
-	Time    float64
-	R, G, B uint8
-	X       float64
-	Y       int
+	Message              string
+	GraphemeClusterCount int
+	Time                 float64
+	R, G, B              uint8
+	X                    float64
+	Y                    int
 }
 
 const DURATION = 12.
@@ -176,7 +177,7 @@ func render(mpv *C.mpv_handle, comments []danmaku) {
 		if comment.X == INVALID_X {
 			comment.X = w - (pos-comment.Time)*w/DURATION
 		}
-		if comment.X+float64(len(comment.Message))*size < 0 {
+		if comment.X+float64(comment.GraphemeClusterCount)*size+spacing < 0 {
 			continue
 		}
 		if comment.Y < 0 {
@@ -202,7 +203,7 @@ func render(mpv *C.mpv_handle, comments []danmaku) {
 				comment.Message))
 		comment.X -= w / DURATION * speed * INTERVAL
 		if comment.Y < len(rows) {
-			rows[comment.Y] = math.Max(rows[comment.Y], comment.X+float64(len(comment.Message))*size)
+			rows[comment.Y] = math.Max(rows[comment.Y], comment.X+float64(comment.GraphemeClusterCount)*size+spacing)
 		}
 	}
 	data := C.CString(strings.Join(danmaku, "\n"))
