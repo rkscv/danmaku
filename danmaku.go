@@ -9,182 +9,249 @@ package main
 // const char *bridge_mpv_error_string(int error);
 // int bridge_mpv_get_property(mpv_handle *mpv, const char *name, mpv_format format, void *data);
 // void bridge_mpv_free(void *data);
-// int emit_danmaku(mpv_handle *mpv, const char *data);
+// int osd_overlay(mpv_handle *mpv, char *data, int64_t w, int64_t h);
+// int remove_overlay(mpv_handle *mpv);
+// int show_text(mpv_handle *mpv, const char *text);
 import "C"
 import (
-	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"os"
-	"path"
-	"slices"
-	"strconv"
+	"math"
 	"strings"
+	"sync/atomic"
 	"unsafe"
 )
 
-type match struct {
-	IsMatched bool `json:"isMatched"`
-	Matches   []struct {
-		EpisodeID int `json:"episodeId"`
-	} `json:"matches"`
-}
-
-type comment struct {
-	Count    int `json:"count"`
-	Comments []struct {
-		Cid int    `json:"cid"`
-		P   string `json:"p"`
-		M   string `json:"m"`
-	} `json:"comments"`
-}
-
 type danmaku struct {
-	Message  string  `json:"message"`
-	Duration float64 `json:"duration"`
-	R        uint8   `json:"r"`
-	G        uint8   `json:"g"`
-	B        uint8   `json:"b"`
+	Message string
+	Time    float64
+	R, G, B uint8
+	X       float64
+	Y       int
 }
 
-var ctx, cancel = context.WithCancel(context.Background())
+const DURATION = 12.
+const INTERVAL = .005
+const INVALID_X = -math.MaxFloat64
+const INVALID_Y = math.MinInt
 
 //export mpv_open_cplugin
 func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
-	name := C.CString("path")
-	err := C.bridge_mpv_observe_property(mpv, 0, name, C.MPV_FORMAT_STRING)
+	name := C.CString("pause")
+	err := C.bridge_mpv_observe_property(mpv, 0, name, C.MPV_FORMAT_NONE)
 	C.free(unsafe.Pointer(name))
 	if err < 0 {
 		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
 		return err
 	}
 
+	var (
+		comments           []danmaku
+		ctx, cancel        = context.WithCancel(context.Background())
+		enabled, available atomic.Bool
+	)
+	enabled.Store(true)
 	for {
-		event := C.bridge_mpv_wait_event(mpv, -1)
+		timeout := -1.
+		if enabled.Load() {
+			if pause, err := getPropertyFlag(mpv, "pause"); err >= 0 && !pause {
+				timeout = INTERVAL
+			}
+		}
+		event := C.bridge_mpv_wait_event(mpv, C.double(timeout))
 		switch event.event_id {
 		case C.MPV_EVENT_SHUTDOWN:
+			cancel()
 			return 0
+
 		case C.MPV_EVENT_FILE_LOADED:
+			available.Store(false)
+			if enabled.Load() {
+				if err := C.remove_overlay(mpv); err < 0 {
+					log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+				}
+			}
 			cancel()
 			ctx, cancel = context.WithCancel(context.Background())
 
-			if event.error < 0 {
-				log.Print(C.GoString(C.bridge_mpv_error_string(event.error)))
-				break
-			}
 			name := C.CString("path")
 			var data *C.char
-			err := C.bridge_mpv_get_property(mpv, name, C.MPV_FORMAT_STRING, unsafe.Pointer(&data))
+			err = C.bridge_mpv_get_property(mpv, name, C.MPV_FORMAT_STRING, unsafe.Pointer(&data))
 			C.free(unsafe.Pointer(name))
 			if err < 0 {
 				log.Print(C.GoString(C.bridge_mpv_error_string(err)))
 				break
 			}
 			go func(ctx context.Context, name string) {
-				danmaku, err := comments(ctx, name)
+				var err error
+				comments, err = dandanplayComments(ctx, name)
 				if err != nil {
 					log.Print(err)
 					return
 				}
-				b, err := json.Marshal(danmaku)
-				if err != nil {
-					panic(err)
-				}
-				data := C.CString(string(b))
-				errno := C.emit_danmaku(mpv, data)
-				C.free(unsafe.Pointer(data))
-				if errno < 0 {
-					log.Print(C.GoString(C.bridge_mpv_error_string(errno)))
+				available.Store(true)
+				if enabled.Load() {
+					if pause, err := getPropertyFlag(mpv, "pause"); err >= 0 && pause {
+						render(mpv, comments)
+					}
+					loaded(mpv, len(comments))
 				}
 			}(ctx, C.GoString(data))
 			C.bridge_mpv_free(unsafe.Pointer(data))
+
+		case C.MPV_EVENT_PROPERTY_CHANGE:
+
+		case C.MPV_EVENT_CLIENT_MESSAGE:
+			data := (*C.mpv_event_client_message)(event.data)
+			args := unsafe.Slice(data.args, data.num_args)
+			if len(args) == 0 || C.GoString(args[0]) != "toggle-danmaku" {
+				break
+			}
+			value := !enabled.Load()
+			enabled.Store(value)
+			if value {
+				if available.Load() {
+					reset(mpv, comments)
+					loaded(mpv, len(comments))
+				} else {
+					showText(mpv, "Danmaku: on")
+				}
+			} else {
+				if err := C.remove_overlay(mpv); err < 0 {
+					log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+				}
+				showText(mpv, "Danmaku: off")
+			}
+
+		case C.MPV_EVENT_SEEK:
+			reset(mpv, comments)
+		}
+
+		if enabled.Load() && available.Load() {
+			render(mpv, comments)
 		}
 	}
 }
 
-func comments(ctx context.Context, name string) ([]danmaku, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
+func render(mpv *C.mpv_handle, comments []danmaku) {
+	w, err := getPropertyDouble(mpv, "osd-width")
+	if err < 0 || w == 0 {
+		return
 	}
-	defer f.Close()
-	h := md5.New()
-	// https://api.dandanplay.net/swagger/ui/index
-	if _, err = io.CopyN(h, f, 16*1024*1024); err != nil {
-		return nil, err
+	h, err := getPropertyDouble(mpv, "osd-height")
+	if err < 0 || h == 0 {
+		return
 	}
-	b, err := json.Marshal(map[string]string{
-		"fileName": path.Base(name),
-		"fileHash": fmt.Sprintf("%x", h.Sum(nil)),
-	})
-	if err != nil {
-		panic(err)
+	pos, err := getPropertyDouble(mpv, "time-pos")
+	if err < 0 {
+		return
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.dandanplay.net/api/v2/match", bytes.NewReader(b))
-	if err != nil {
-		panic(err)
+	size, err := getPropertyDouble(mpv, "osd-font-size")
+	if err < 0 {
+		return
 	}
-	req.Header.Add("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
+	speed, err := getPropertyDouble(mpv, "speed")
+	if err < 0 {
+		return
 	}
-	defer resp.Body.Close()
-	d := json.NewDecoder(resp.Body)
-	var match match
-	if err = d.Decode(&match); err != nil {
-		panic(err)
-	}
-	if len(match.Matches) > 1 {
-		return nil, errors.New("multiple matching episodes")
-	} else if !match.IsMatched {
-		return nil, errors.New("no matching episode")
+	// https://mpv.io/manual/stable/#options-sub-font-size
+	size = size / 720 * h / 2
+	spacing := size / 10
+	rows := make([]float64, int(math.Max(h/(size+spacing), 1)))
+	for i := range rows {
+		rows[i] = INVALID_X
 	}
 
-	url := fmt.Sprintf("https://api.dandanplay.net/api/v2/comment/%d?withRelated=true", match.Matches[0].EpisodeID)
-	req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		panic(err)
-	}
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	d = json.NewDecoder(resp.Body)
-	var comment comment
-	if err = d.Decode(&comment); err != nil {
-		panic(err)
-	}
-	comments := make([]danmaku, comment.Count)
-	for i, comment := range comment.Comments {
-		p := strings.SplitN(comment.P, ",", 4)
-		t, err := strconv.ParseFloat(p[0], 64)
-		if err != nil {
-			panic(err)
+	var danmaku []string
+	for i := range comments {
+		comment := &comments[i]
+		if comment.Time > pos+DURATION/2 {
+			break
 		}
-		c, err := strconv.Atoi(p[2])
-		if err != nil {
-			panic(err)
+
+		if comment.X == INVALID_X {
+			comment.X = w - (pos-comment.Time)*w/DURATION
 		}
-		comments[i] = danmaku{
-			Message:  comment.M,
-			Duration: t,
-			R:        uint8(c / (256 * 256)),
-			G:        uint8(c % (256 * 256) / 256),
-			B:        uint8(c % 256),
+		if comment.X+float64(len(comment.Message))*size < 0 {
+			continue
+		}
+		if comment.Y < 0 {
+			for i, row := range rows {
+				if row < comment.X {
+					comment.Y = i
+					break
+				}
+			}
+			if comment.Y < 0 {
+				for i, row := range rows {
+					if comment.Y < 0 || row < rows[comment.Y] {
+						comment.Y = i
+					}
+				}
+			}
+		}
+
+		danmaku = append(danmaku,
+			fmt.Sprintf("{\\pos(%f,%f)\\c&H%x%x%x&\\alpha&H30\\fscx50\\fscy50\\bord1.5\\b1\\q2}%s",
+				comment.X, float64(comment.Y)*(size+spacing),
+				comment.B, comment.G, comment.R,
+				comment.Message))
+		comment.X -= w / DURATION * speed * INTERVAL
+		if comment.Y < len(rows) {
+			rows[comment.Y] = math.Max(rows[comment.Y], comment.X+float64(len(comment.Message))*size)
 		}
 	}
-	slices.SortFunc(comments, func(a, b danmaku) int {
-		return int(a.Duration - b.Duration)
-	})
-	return comments, nil
+	data := C.CString(strings.Join(danmaku, "\n"))
+	if err = C.osd_overlay(mpv, data, C.int64_t(w), C.int64_t(h)); err < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+	}
+	C.free(unsafe.Pointer(data))
+}
+
+func reset(mpv *C.mpv_handle, danmaku []danmaku) {
+	for i := range danmaku {
+		danmaku[i].X = INVALID_X
+		danmaku[i].Y = INVALID_Y
+	}
+}
+
+func loaded(mpv *C.mpv_handle, n int) {
+	text := fmt.Sprintf("Loaded %d danmaku comment", n)
+	if n > 1 {
+		text += "s"
+	}
+	showText(mpv, text)
+}
+
+func showText(mpv *C.mpv_handle, text string) {
+	data := C.CString(text)
+	if err := C.show_text(mpv, data); err < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+	}
+	C.free(unsafe.Pointer(data))
+}
+
+func getPropertyDouble(mpv *C.mpv_handle, name string) (float64, C.int) {
+	n := C.CString(name)
+	var data C.double
+	err := C.bridge_mpv_get_property(mpv, n, C.MPV_FORMAT_DOUBLE, unsafe.Pointer(&data))
+	if err < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+	}
+	C.free(unsafe.Pointer(n))
+	return float64(data), err
+}
+
+func getPropertyFlag(mpv *C.mpv_handle, name string) (bool, C.int) {
+	n := C.CString(name)
+	var data C.int
+	err := C.bridge_mpv_get_property(mpv, n, C.MPV_FORMAT_FLAG, unsafe.Pointer(&data))
+	if err < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+	}
+	C.free(unsafe.Pointer(n))
+	return data != 0, err
 }
 
 func main() {

@@ -1,4 +1,5 @@
 /mpv
+.vscode
 *.h
 *.dll
 *.so
