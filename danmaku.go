@@ -39,11 +39,11 @@ const INVALID_Y = math.MinInt
 //export mpv_open_cplugin
 func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 	name := C.CString("pause")
-	err := C.bridge_mpv_observe_property(mpv, 0, name, C.MPV_FORMAT_NONE)
+	errno := C.bridge_mpv_observe_property(mpv, 0, name, C.MPV_FORMAT_NONE)
 	C.free(unsafe.Pointer(name))
-	if err < 0 {
-		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
-		return err
+	if errno < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(errno)))
+		return errno
 	}
 
 	var (
@@ -52,6 +52,24 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 		enabled, available atomic.Bool
 	)
 	enabled.Store(true)
+	get := func(ctx context.Context, name string) {
+		var err error
+		comments, err = dandanplayComments(ctx, name)
+		if err != nil {
+			log.Print(err)
+			if enabled.Load() {
+				showText(mpv, "dandanplay: "+err.Error())
+			}
+			return
+		}
+		available.Store(true)
+		if enabled.Load() {
+			if pause, err := getPropertyFlag(mpv, "pause"); err >= 0 && pause {
+				render(mpv, comments)
+			}
+			loaded(mpv, len(comments))
+		}
+	}
 	for {
 		timeout := -1.
 		if enabled.Load() {
@@ -74,31 +92,9 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 			}
 			cancel()
 			ctx, cancel = context.WithCancel(context.Background())
-
-			name := C.CString("path")
-			var data *C.char
-			err = C.bridge_mpv_get_property(mpv, name, C.MPV_FORMAT_STRING, unsafe.Pointer(&data))
-			C.free(unsafe.Pointer(name))
-			if err < 0 {
-				log.Print(C.GoString(C.bridge_mpv_error_string(err)))
-				break
+			if path, err := getPropertyString(mpv, "path"); err >= 0 {
+				go get(ctx, path)
 			}
-			go func(ctx context.Context, name string) {
-				var err error
-				comments, err = dandanplayComments(ctx, name)
-				if err != nil {
-					log.Print(err)
-					return
-				}
-				available.Store(true)
-				if enabled.Load() {
-					if pause, err := getPropertyFlag(mpv, "pause"); err >= 0 && pause {
-						render(mpv, comments)
-					}
-					loaded(mpv, len(comments))
-				}
-			}(ctx, C.GoString(data))
-			C.bridge_mpv_free(unsafe.Pointer(data))
 
 		case C.MPV_EVENT_PROPERTY_CHANGE:
 
@@ -116,6 +112,11 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 					loaded(mpv, len(comments))
 				} else {
 					showText(mpv, "Danmaku: on")
+					if path, err := getPropertyString(mpv, "path"); err >= 0 {
+						cancel()
+						ctx, cancel = context.WithCancel(context.Background())
+						go get(ctx, path)
+					}
 				}
 			} else {
 				if err := C.remove_overlay(mpv); err < 0 {
@@ -125,7 +126,9 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 			}
 
 		case C.MPV_EVENT_SEEK:
-			reset(mpv, comments)
+			if enabled.Load() && available.Load() {
+				reset(mpv, comments)
+			}
 		}
 
 		if enabled.Load() && available.Load() {
@@ -252,6 +255,20 @@ func getPropertyFlag(mpv *C.mpv_handle, name string) (bool, C.int) {
 	}
 	C.free(unsafe.Pointer(n))
 	return data != 0, err
+}
+
+func getPropertyString(mpv *C.mpv_handle, name string) (string, C.int) {
+	n := C.CString(name)
+	var data *C.char
+	err := C.bridge_mpv_get_property(mpv, n, C.MPV_FORMAT_STRING, unsafe.Pointer(&data))
+	C.free(unsafe.Pointer(n))
+	if err < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(err)))
+		return "", err
+	}
+	value := C.GoString(data)
+	C.bridge_mpv_free(unsafe.Pointer(data))
+	return value, 0
 }
 
 func main() {
