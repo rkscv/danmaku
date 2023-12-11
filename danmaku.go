@@ -52,10 +52,13 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 		ctx, cancel        = context.WithCancel(context.Background())
 		enabled, available atomic.Bool
 	)
-	enabled.Store(true)
-	get := func(ctx context.Context, name string) {
+	get := func(ctx context.Context) {
+		path, errno := getPropertyString(mpv, "path")
+		if errno < 0 {
+			return
+		}
 		var err error
-		comments, err = dandanplayComments(ctx, name)
+		comments, err = dandanplayComments(ctx, path)
 		if err != nil {
 			log.Print(err)
 			if enabled.Load() {
@@ -85,16 +88,14 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 			return 0
 
 		case C.MPV_EVENT_FILE_LOADED:
+			cancel()
+			ctx, cancel = context.WithCancel(context.Background())
 			available.Store(false)
 			if enabled.Load() {
 				if err := C.remove_overlay(mpv); err < 0 {
 					log.Print(C.GoString(C.bridge_mpv_error_string(err)))
 				}
-			}
-			cancel()
-			ctx, cancel = context.WithCancel(context.Background())
-			if path, err := getPropertyString(mpv, "path"); err >= 0 {
-				go get(ctx, path)
+				go get(ctx)
 			}
 
 		case C.MPV_EVENT_PROPERTY_CHANGE:
@@ -113,11 +114,9 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 					loaded(mpv, len(comments))
 				} else {
 					showText(mpv, "Danmaku: on")
-					if path, err := getPropertyString(mpv, "path"); err >= 0 {
-						cancel()
-						ctx, cancel = context.WithCancel(context.Background())
-						go get(ctx, path)
-					}
+					cancel()
+					ctx, cancel = context.WithCancel(context.Background())
+					go get(ctx)
 				}
 			} else {
 				if err := C.remove_overlay(mpv); err < 0 {
