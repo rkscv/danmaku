@@ -44,7 +44,7 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 	C.free(unsafe.Pointer(name))
 	if errno < 0 {
 		log.Print(C.GoString(C.bridge_mpv_error_string(errno)))
-		return errno
+		return -1
 	}
 
 	var (
