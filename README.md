@@ -17,3 +17,5 @@ Example to bind the `d` key to toggle the danmaku visibility in your `input.conf
 ```
 d script-message toggle-danmaku
 ```
+
+It may take some time to load the danmaku after first enabling it.
