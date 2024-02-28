@@ -110,7 +110,7 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 			enabled.Store(value)
 			if value {
 				if available.Load() {
-					reset(mpv, comments)
+					reset(comments)
 					loaded(mpv, len(comments))
 				} else {
 					showText(mpv, "Danmaku: on")
@@ -127,7 +127,7 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 
 		case C.MPV_EVENT_SEEK:
 			if enabled.Load() && available.Load() {
-				reset(mpv, comments)
+				reset(comments)
 			}
 		}
 
@@ -212,7 +212,7 @@ func render(mpv *C.mpv_handle, comments []danmaku) {
 	C.free(unsafe.Pointer(data))
 }
 
-func reset(mpv *C.mpv_handle, danmaku []danmaku) {
+func reset(danmaku []danmaku) {
 	for i := range danmaku {
 		danmaku[i].X = INVALID_X
 		danmaku[i].Y = INVALID_Y
