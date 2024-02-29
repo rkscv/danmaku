@@ -19,3 +19,9 @@ d script-message toggle-danmaku
 ```
 
 It may take some time to load the danmaku after first enabling it.
+
+Set the following options in `script-opts/danmaku.conf` to configure the plugin:
+
+```
+font_size=40
+```

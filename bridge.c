@@ -1,4 +1,7 @@
 #include "mpv/client.h"
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
 mpv_event *bridge_mpv_wait_event(mpv_handle *mpv, double timeout) {
   return mpv_wait_event(mpv, timeout);
@@ -19,6 +22,28 @@ int bridge_mpv_get_property(mpv_handle *mpv, const char *name,
 }
 
 void bridge_mpv_free(void *data) { mpv_free(data); }
+
+int get_conf_file_name(mpv_handle *mpv, char **data) {
+  const char *client_name = mpv_client_name(mpv);
+  const char *prefix = "~~/script-opts/";
+  const char *suffix = ".conf";
+  char *path =
+      malloc((strlen(client_name) + strlen(prefix) + strlen(suffix) + 1) *
+             sizeof(char));
+  strcpy(path, prefix);
+  strcat(path, client_name);
+  strcat(path, suffix);
+  const char *args[] = {"expand-path", path, NULL};
+  mpv_node node;
+  int code = mpv_command_ret(mpv, args, &node);
+  free(path);
+  if (code < 0)
+    return code;
+  assert(node.format == MPV_FORMAT_STRING);
+  *data = strdup(node.u.string);
+  mpv_free_node_contents(&node);
+  return code;
+}
 
 int osd_overlay(mpv_handle *mpv, char *data, int64_t w, int64_t h) {
   char *keys[] = {"name", "id", "format", "data", "res_x", "res_y"};

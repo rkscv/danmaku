@@ -9,15 +9,19 @@ package main
 // const char *bridge_mpv_error_string(int error);
 // int bridge_mpv_get_property(mpv_handle *mpv, const char *name, mpv_format format, void *data);
 // void bridge_mpv_free(void *data);
+// int get_conf_file_name(mpv_handle *mpv, char **data);
 // int osd_overlay(mpv_handle *mpv, char *data, int64_t w, int64_t h);
 // int remove_overlay(mpv_handle *mpv);
 // int show_text(mpv_handle *mpv, const char *text);
 import "C"
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"math"
+	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"unsafe"
@@ -39,6 +43,12 @@ const INVALID_Y = math.MinInt
 
 //export mpv_open_cplugin
 func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
+	opts := readOptions(mpv)
+	size, err := strconv.ParseFloat(opts["font_size"], 64)
+	if err != nil || size <= 0 {
+		size = 40
+	}
+
 	name := C.CString("pause")
 	errno := C.bridge_mpv_observe_property(mpv, 0, name, C.MPV_FORMAT_NONE)
 	C.free(unsafe.Pointer(name))
@@ -69,7 +79,7 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 		available.Store(true)
 		if enabled.Load() {
 			if pause, err := getPropertyFlag(mpv, "pause"); err >= 0 && pause {
-				render(mpv, comments)
+				render(mpv, comments, size)
 			}
 			loaded(mpv, len(comments))
 		}
@@ -132,12 +142,12 @@ func mpv_open_cplugin(mpv *C.struct_mpv_handle) C.int {
 		}
 
 		if enabled.Load() && available.Load() {
-			render(mpv, comments)
+			render(mpv, comments, size)
 		}
 	}
 }
 
-func render(mpv *C.mpv_handle, comments []danmaku) {
+func render(mpv *C.mpv_handle, comments []danmaku, size float64) {
 	w, err := getPropertyDouble(mpv, "osd-width")
 	if err < 0 || w == 0 {
 		return
@@ -150,16 +160,10 @@ func render(mpv *C.mpv_handle, comments []danmaku) {
 	if err < 0 {
 		return
 	}
-	size, err := getPropertyDouble(mpv, "osd-font-size")
-	if err < 0 {
-		return
-	}
 	speed, err := getPropertyDouble(mpv, "speed")
 	if err < 0 {
 		return
 	}
-	// https://mpv.io/manual/stable/#options-sub-font-size
-	size = size / 720 * h / 2
 	spacing := size / 10
 	rows := make([]float64, int(math.Max(h/(size+spacing), 1)))
 	for i := range rows {
@@ -196,10 +200,10 @@ func render(mpv *C.mpv_handle, comments []danmaku) {
 		}
 
 		danmaku = append(danmaku,
-			fmt.Sprintf("{\\pos(%f,%f)\\c&H%x%x%x&\\alpha&H30\\fscx50\\fscy50\\bord1.5\\b1\\q2}%s",
+			fmt.Sprintf("{\\pos(%f,%f)\\c&H%x%x%x&\\alpha&H30\\fs%f\\bord1.5\\b1\\q2}%s",
 				comment.X, float64(comment.Y)*(size+spacing),
 				comment.B, comment.G, comment.R,
-				comment.Message))
+				size, comment.Message))
 		comment.X -= w / DURATION * speed * INTERVAL
 		if comment.Y < len(rows) {
 			rows[comment.Y] = math.Max(rows[comment.Y], comment.X+float64(comment.GraphemeClusterCount)*size+spacing)
@@ -269,6 +273,39 @@ func getPropertyString(mpv *C.mpv_handle, name string) (string, C.int) {
 	value := C.GoString(data)
 	C.bridge_mpv_free(unsafe.Pointer(data))
 	return value, 0
+}
+
+func readOptions(mpv *C.mpv_handle) map[string]string {
+	var name *C.char
+	if errno := C.get_conf_file_name(mpv, &name); errno < 0 {
+		log.Print(C.GoString(C.bridge_mpv_error_string(errno)))
+		return nil
+	}
+	f, err := os.Open(C.GoString(name))
+	C.free(unsafe.Pointer(name))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Print(err)
+		}
+		return nil
+	}
+	opts := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) == 2 {
+			opts[kv[0]] = kv[1]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Print(err)
+	}
+	f.Close()
+	return opts
 }
 
 func main() {
