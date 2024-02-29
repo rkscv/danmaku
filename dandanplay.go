@@ -62,10 +62,9 @@ func dandanplayComments(ctx context.Context, name string) ([]danmaku, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	d := json.NewDecoder(resp.Body)
 	var match dandanplayMatch
-	if err = d.Decode(&match); err != nil {
-		panic(err)
+	if err = json.NewDecoder(resp.Body).Decode(&match); err != nil {
+		return nil, err
 	}
 	if len(match.Matches) > 1 {
 		return nil, errors.New("multiple matching episodes")
@@ -83,10 +82,9 @@ func dandanplayComments(ctx context.Context, name string) ([]danmaku, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	d = json.NewDecoder(resp.Body)
 	var comment dandanplayComment
-	if err = d.Decode(&comment); err != nil {
-		panic(err)
+	if err = json.NewDecoder(resp.Body).Decode(&comment); err != nil {
+		return nil, err
 	}
 	comments := make([]danmaku, comment.Count)
 	for i, comment := range comment.Comments {
