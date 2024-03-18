@@ -1,5 +1,2 @@
-/mpv
 .vscode
-*.h
-*.dll
-*.so
+/target

@@ -1,0 +1,21 @@
+[package]
+name = "danmaku"
+version = "0.1.2"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0"
+hex = "0.4"
+md-5 = "0.10"
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.36", features = ["rt-multi-thread", "sync"] }
+unicode-segmentation = "1.10"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

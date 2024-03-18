@@ -2,13 +2,13 @@
 
 ## Install
 
-Install libmpv. Run:
+Run:
 
 ```bash
-go build -buildmode=c-shared -ldflags='-w -s' -trimpath
+cargo build --release
 ```
 
-Append .dll/.so to the output file name. Copy the .dll/.so file to the `scripts` subdirectory of your mpv configuration directory.
+Copy the `.dll`/`.so` file to the `scripts` subdirectory of your mpv configuration directory.
 
 ## Usage
 
