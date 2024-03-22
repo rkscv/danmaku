@@ -6,14 +6,13 @@ use crate::{
     log_code, CTX,
 };
 use std::{
-    ffi::{c_char, c_int, CStr, CString},
+    ffi::{c_char, c_int, CStr},
     mem::MaybeUninit,
     os::raw::c_void,
     ptr::addr_of_mut,
 };
 
-pub unsafe fn get_property_f64(name: &str) -> Option<f64> {
-    let name = CString::new(name).unwrap();
+pub unsafe fn get_property_f64(name: &CStr) -> Option<f64> {
     let mut data = MaybeUninit::<f64>::uninit().assume_init();
     let error = mpv_get_property(
         CTX,
@@ -29,8 +28,7 @@ pub unsafe fn get_property_f64(name: &str) -> Option<f64> {
     }
 }
 
-pub unsafe fn get_property_bool(name: &str) -> Option<bool> {
-    let name = CString::new(name).unwrap();
+pub unsafe fn get_property_bool(name: &CStr) -> Option<bool> {
     let mut data = MaybeUninit::<c_int>::uninit().assume_init();
     let error = mpv_get_property(
         CTX,
@@ -46,8 +44,7 @@ pub unsafe fn get_property_bool(name: &str) -> Option<bool> {
     }
 }
 
-pub unsafe fn get_property_string(name: &str) -> Option<String> {
-    let name = CString::new(name).unwrap();
+pub unsafe fn get_property_string(name: &CStr) -> Option<String> {
     let mut data = MaybeUninit::<*mut c_char>::uninit().assume_init();
     let error = mpv_get_property(
         CTX,

@@ -59,8 +59,7 @@ unsafe extern "C" fn mpv_open_cplugin(ctx: *mut mpv_handle) -> c_int {
 }
 
 async unsafe fn main(ctx: *mut mpv_handle) -> c_int {
-    let name = CString::new("pause").unwrap();
-    let error = mpv_observe_property(ctx, 0, name.as_ptr(), mpv_format::MPV_FORMAT_NONE);
+    let error = mpv_observe_property(ctx, 0, c"pause".as_ptr(), mpv_format::MPV_FORMAT_NONE);
     if error < 0 {
         log_code(error);
         return -1;
@@ -71,7 +70,7 @@ async unsafe fn main(ctx: *mut mpv_handle) -> c_int {
     let mut handle = spawn(async {});
     loop {
         let timeout = if enabled.load(Ordering::SeqCst)
-            && matches!(get_property_bool("pause"), Some(false))
+            && matches!(get_property_bool(c"pause"), Some(false))
         {
             INTERVAL
         } else {
@@ -100,13 +99,13 @@ async unsafe fn main(ctx: *mut mpv_handle) -> c_int {
             }
             mpv_event_id::MPV_EVENT_CLIENT_MESSAGE => {
                 let data = &*(event.data as *mut mpv_event_client_message);
-                let Some(Ok("toggle-danmaku")) =
-                    from_raw_parts(data.args, data.num_args.try_into().unwrap())
-                        .first()
-                        .map(|&arg| CStr::from_ptr(arg).to_str())
-                else {
+                if !from_raw_parts(data.args, data.num_args.try_into().unwrap())
+                    .first()
+                    .map(|&arg| CStr::from_ptr(arg) == c"toggle-danmaku")
+                    .unwrap_or_default()
+                {
                     continue;
-                };
+                }
                 if enabled.fetch_xor(true, Ordering::SeqCst) {
                     remove_overlay();
                     osd_message("Danmaku: off");
@@ -136,10 +135,10 @@ async unsafe fn main(ctx: *mut mpv_handle) -> c_int {
 }
 
 unsafe fn render(comments: &mut Vec<Danmaku>) -> Option<()> {
-    let width = get_property_f64("osd-width").filter(|&w| w > 0.)?;
-    let height = get_property_f64("osd-height").filter(|&h| h > 0.)?;
-    let pos = get_property_f64("time-pos")?;
-    let speed = get_property_f64("speed")?;
+    let width = get_property_f64(c"osd-width").filter(|&w| w > 0.)?;
+    let height = get_property_f64(c"osd-height").filter(|&h| h > 0.)?;
+    let pos = get_property_f64(c"time-pos")?;
+    let speed = get_property_f64(c"speed")?;
     let spacing = FONT_SIZE / 10.;
     let mut ends = Vec::new();
     ends.resize(max((height / (FONT_SIZE + spacing)) as usize, 1), None);
@@ -194,13 +193,13 @@ unsafe fn render(comments: &mut Vec<Danmaku>) -> Option<()> {
 }
 
 async unsafe fn get(comments: Arc<Mutex<Option<Vec<Danmaku>>>>, enabled: Arc<AtomicBool>) {
-    let Some(path) = get_property_string("path") else {
+    let Some(path) = get_property_string(c"path") else {
         return;
     };
     match get_danmaku(path).await {
         Ok(mut danmaku) => {
             if enabled.load(Ordering::SeqCst) {
-                if let Some(true) = get_property_bool("pause") {
+                if let Some(true) = get_property_bool(c"pause") {
                     render(&mut danmaku);
                 }
                 loaded(danmaku.len());
@@ -232,9 +231,8 @@ unsafe fn loaded(n: usize) {
 }
 
 unsafe fn osd_message(text: &str) {
-    let arg1 = CString::new("show-text").unwrap();
     let arg2 = CString::new(text).unwrap();
-    let mut args = [arg1.as_ptr(), arg2.as_ptr(), null()];
+    let mut args = [c"show-text".as_ptr(), arg2.as_ptr(), null()];
     let error = mpv_command(CTX, args.as_mut_ptr());
     if error < 0 {
         log_code(error);

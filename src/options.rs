@@ -15,9 +15,8 @@ use std::{
 #[allow(clippy::uninit_assumed_init)]
 #[allow(invalid_value)]
 pub unsafe fn read_options() -> Result<Option<HashMap<String, String>>> {
-    let arg1 = CString::new("expand-path").unwrap();
     let arg2 = CString::new(format!("~~/script-opts/{}.conf", CLIENT_NAME)).unwrap();
-    let mut args = [arg1.as_ptr(), arg2.as_ptr(), null()];
+    let mut args = [c"expand-path".as_ptr(), arg2.as_ptr(), null()];
     let mut result = MaybeUninit::<mpv_node>::uninit().assume_init();
     let error = mpv_command_ret(CTX, args.as_mut_ptr(), addr_of_mut!(result));
     if error < 0 {
