@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "danmaku"
-version = "0.1.2"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "hex",
